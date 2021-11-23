@@ -1,0 +1,140 @@
+---
+title: "bootstrapping"
+author: "Xinyuan Liu"
+date: "11/23/2021"
+output: github_document
+---
+
+```{r}
+library(tidyverse)
+library(p8105.datasets)
+
+set.seed(1)
+```
+
+
+```{r}
+n_samp = 250
+
+sim_df_const = 
+  tibble(
+    x = rnorm(n_samp, 1, 1),
+    error = rnorm(n_samp, 0, 1),
+    y = 2 + 3 * x + error
+  )
+
+sim_df_nonconst = sim_df_const %>% 
+  mutate(
+  error = error * .75 * x,
+  y = 2 + 3 * x + error
+)
+```
+
+
+```{r}
+sim_df_const %>% 
+  lm(y ~ x, data = .) %>% 
+  broom::tidy()
+```
+
+## Let's try to use the bootstapping for inference
+
+```{r}
+bootstrap_sample = 
+  sim_df_nonconst %>% 
+    sample_frac(size = 1, replace = TRUE) %>% 
+    arrange(x)
+
+lm(y ~ x, data = bootstrap_sample)
+```
+
+Let's write a function
+
+```{r}
+boot_sample = function(df){
+  
+  sample_frac(df, size = 1, replace = TRUE)
+  
+}
+```
+
+NOw make a tibble to keep track of everything
+
+```{r}
+boot_strap_df = 
+  tibble(
+    strap_number = 1:1000,
+    strap_sample = rerun(1000, boot_sample(sim_df_nonconst))
+  )
+```
+
+From here... things are kind the same as always
+
+```{r}
+boot_strap_result=
+  boot_strap_df %>% 
+    mutate(
+      models = map(.x = strap_sample, ~lm(y ~ x, data = .x)),
+      results = map(models, broom::tidy)
+    ) %>% 
+    select(strap_number, results) %>% 
+    unnest(results)
+
+boot_strap_result %>% 
+  ggplot(aes(x = estimate)) + 
+  geom_histogram()+ 
+  facet_grid(. ~ term, scales = "free")
+
+lm(y ~ x, data = sim_df_nonconst) %>% 
+  broom::tidy()
+
+boot_strap_result %>% 
+  group_by(term) %>% 
+  summarize(
+    se = sd(estimate)
+  )
+```
+
+## Use 'modelr'
+
+```{r}
+boot_straps = 
+  sim_df_nonconst %>% 
+  modelr::bootstrap(n = 1000, id = "strap_number")
+
+```
+
+## air_bnb
+
+```{r}
+data("nyc_airbnb")
+
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(stars = review_scores_location / 2) %>% 
+  rename(
+    boro = neighbourhood_group,
+    neighborhood = neighbourhood) %>% 
+  filter(boro != "Staten Island") %>% 
+  select(price, stars, boro, neighborhood, room_type)
+
+nyc_airbnb %>% 
+  ggplot(aes(x = stars, y = price, color = room_type)) + 
+  geom_point() 
+```
+
+
+```{r}
+nyc_airbnb %>% 
+  filter(boro == "Manhattan") %>% 
+  modelr::bootstrap(n = 1000, id = "strap_number") %>% 
+  mutate(
+    models = map(.x = strap, ~lm(price ~ stars, data = .x)),
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(strap_number, results) %>% 
+  unnest(results)
+```
+
+
+
